@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "9411:9411"
+
+  service-a:
+    build: ./service_a
+    environment:
+      - PORT=8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - service-b
+
+  service-b:
+    build: ./service_b
+    environment:
+      - WEATHER_API_KEY=5ddbe5913ea64f83b40142353242905
+      - PORT=8081
+    ports:
+      - "8081:8081"
+    depends_on:
+      - zipkin
