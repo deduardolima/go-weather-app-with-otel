@@ -3,53 +3,79 @@ package internal
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel"
 )
 
-type CEPRequest struct {
+type Input struct {
 	CEP string `json:"cep"`
 }
 
-func NewCEPHandler(tracer trace.Tracer) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req CEPRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.CEP) != 8 {
-			http.Error(w, "invalid zipcode", http.StatusUnprocessableEntity)
-			return
-		}
+type InputHandler struct {
+	Client *http.Client
+}
 
-		ctx, span := tracer.Start(r.Context(), "ServiceA_HandleCEP")
-		defer span.End()
+func NewInputHandler(client *http.Client) *InputHandler {
+	return &InputHandler{Client: client}
+}
 
-		jsonData, _ := json.Marshal(req)
-
-		client := http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", "http://service-b:8081/weather", bytes.NewBuffer(jsonData))
-		if err != nil {
-			http.Error(w, "failed to create request for service B", http.StatusInternalServerError)
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-
-		resp, err := client.Do(httpReq)
-		if err != nil {
-			http.Error(w, "failed to communicate with service B", http.StatusInternalServerError)
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			http.Error(w, string(body), resp.StatusCode)
-			return
-		}
-
-		body, _ := io.ReadAll(resp.Body)
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(body)
+func (h *InputHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
+
+	var input Input
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil || len(input.CEP) != 8 {
+		http.Error(w, "invalid zipcode", http.StatusUnprocessableEntity)
+		return
+	}
+
+	fmt.Printf("Input: %+v\n", input)
+
+	tr := otel.Tracer("service-a")
+	ctx, span := tr.Start(r.Context(), "InputHandler")
+	defer span.End()
+
+	serviceBURL := os.Getenv("SERVICE_B_URL")
+	if serviceBURL == "" {
+		serviceBURL = "http://service-b:8081/weather"
+	}
+
+	jsonInput, _ := json.Marshal(input)
+	req, err := http.NewRequestWithContext(ctx, "POST", serviceBURL, bytes.NewBuffer(jsonInput))
+	if err != nil {
+		http.Error(w, "failed to create request", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.Client.Do(req)
+	if err != nil {
+		http.Error(w, "failed to get response from service B", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		http.Error(w, string(body), resp.StatusCode)
+		return
+	}
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "failed to read response body", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("Response from B: %s\n", string(responseBody))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(responseBody)
 }

@@ -4,59 +4,52 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
 
-type ViaCEP struct {
-	Cep         string `json:"cep"`
-	Logradouro  string `json:"logradouro"`
-	Complemento string `json:"complemento"`
-	Bairro      string `json:"bairro"`
-	Localidade  string `json:"localidade"`
-	Uf          string `json:"uf"`
-	Unidade     string `json:"unidade"`
-	Ibge        string `json:"ibge"`
-	Gia         string `json:"gia"`
-}
-
 type LocationClient struct {
+	client *http.Client
 	tracer trace.Tracer
 }
 
-func NewLocationClient(tracer trace.Tracer) *LocationClient {
-	return &LocationClient{tracer: tracer}
+type ViaCEPResponse struct {
+	Localidade string `json:"localidade"`
 }
 
-func (lc *LocationClient) GetLocation(ctx context.Context, cep string) (*ViaCEP, error) {
-	_, span := lc.tracer.Start(ctx, "LocationClient_GetLocation")
+func NewLocationClient() *LocationClient {
+	return &LocationClient{
+		client: &http.Client{},
+		tracer: otel.Tracer("location-client"),
+	}
+}
+
+func (c *LocationClient) GetLocation(ctx context.Context, cep string) (string, error) {
+	ctx, span := c.tracer.Start(ctx, "getLocation")
 	defer span.End()
 
-	resp, err := http.Get("https://viacep.com.br/ws/" + cep + "/json/")
+	url := fmt.Sprintf("https://viacep.com.br/ws/%s/json/", cep)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, err
+		return "", err
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch location for CEP: %s", cep)
+		return "", fmt.Errorf("failed to get location")
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	var viaCEP ViaCEP
-	err = json.Unmarshal(body, &viaCEP)
-	if err != nil {
-		return nil, err
+	var locationResponse ViaCEPResponse
+	if err := json.NewDecoder(resp.Body).Decode(&locationResponse); err != nil {
+		return "", err
 	}
 
-	if viaCEP.Localidade == "" {
-		return nil, fmt.Errorf("can not find zipcode")
-	}
-
-	return &viaCEP, nil
+	return locationResponse.Localidade, nil
 }

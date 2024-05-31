@@ -1,91 +1,122 @@
-package internal_test
+package internal
 
 import (
-	"context"
-	"errors"
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"os"
 	"testing"
 
-	"github.com/deduardolima/go-weather-with-otel/internal"
 	"github.com/stretchr/testify/assert"
-	"go.opentelemetry.io/otel/trace"
 )
 
-type MockTracerProvider struct{}
-
-type MockTracer struct{}
-
-func (t *MockTracer) Start(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
-
-	return ctx, nil
+type MockRoundTripper struct {
+	StatusCode int
+	Response   string
 }
 
-func (t *MockTracer) ForceFlush(ctx context.Context) error {
-
-	return nil
-}
-
-func TestCEPHandler_ValidCEP(t *testing.T) {
-	tracerProvider := &MockTracerProvider{}
-	handler := internal.NewCEPHandler(tracerProvider)
-
-	reqBody := `{"cep": "12345678"}`
-	req := httptest.NewRequest("POST", "/cep", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	expectedResponseBody := `{"temp_C": 20, "temp_F": 68, "temp_K": 293.15}`
-	assert.Equal(t, expectedResponseBody, w.Body.String())
-}
-
-func TestCEPHandler_InvalidCEP(t *testing.T) {
-	tracer := &MockTracerProvider{}
-	handler := internal.NewCEPHandler(tracer)
-
-	reqBody := `{"cep": "1234"}`
-	req := httptest.NewRequest("POST", "/cep", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
-
-	expectedResponseBody := "invalid zipcode\n"
-	assert.Equal(t, expectedResponseBody, w.Body.String())
-}
-
-func TestCEPHandler_ServiceBError(t *testing.T) {
-	tracer := &MockTracerProvider{}
-	handler := internal.NewCEPHandler(tracer)
-
-	reqBody := `{"cep": "12345678"}`
-	req := httptest.NewRequest("POST", "/cep", strings.NewReader(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-
-	transport := &MockTransport{
-		RoundTripFunc: func(req *http.Request) (*http.Response, error) {
-			return nil, errors.New("service B error")
-		},
+func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	response := &http.Response{
+		StatusCode: m.StatusCode,
+		Body:       io.NopCloser(bytes.NewBufferString(m.Response)),
+		Header:     make(http.Header),
 	}
-	client := &http.Client{Transport: transport}
+	return response, nil
+}
 
-	oldClient := http.DefaultClient
-	defer func() { http.DefaultClient = oldClient }()
-	http.DefaultClient = client
+func TestInputHandler_ValidCEP(t *testing.T) {
+	os.Setenv("SERVICE_B_URL", "http://service-b:8081/weather")
 
-	w := httptest.NewRecorder()
+	input := Input{CEP: "12345678"}
+	jsonInput, _ := json.Marshal(input)
 
-	handler.ServeHTTP(w, req)
+	mockResponse := `{"city":"Curitiba","temp_C":20,"temp_F":68,"temp_K":293.15}`
+	mockTransport := &MockRoundTripper{StatusCode: http.StatusOK, Response: mockResponse}
+	client := &http.Client{Transport: mockTransport}
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	req := httptest.NewRequest("POST", "/input", bytes.NewBuffer(jsonInput))
+	rr := httptest.NewRecorder()
 
-	expectedResponseBody := "failed to communicate with service B\n"
-	assert.Equal(t, expectedResponseBody, w.Body.String())
+	handler := NewInputHandler(client)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, mockResponse, rr.Body.String())
+}
+
+func TestInputHandler_InvalidCEP(t *testing.T) {
+	input := Input{CEP: "12345"}
+	jsonInput, _ := json.Marshal(input)
+
+	req := httptest.NewRequest("POST", "/input", bytes.NewBuffer(jsonInput))
+	rr := httptest.NewRecorder()
+
+	handler := NewInputHandler(http.DefaultClient)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, rr.Code)
+	assert.Equal(t, "invalid zipcode\n", rr.Body.String())
+}
+
+func TestInputHandler_FailedToCreateRequest(t *testing.T) {
+	os.Setenv("SERVICE_B_URL", "http://service-b:8081/weather")
+
+	input := Input{CEP: "12345678"}
+	jsonInput, _ := json.Marshal(input)
+
+	req := httptest.NewRequest("POST", "/input", bytes.NewBuffer(jsonInput))
+	rr := httptest.NewRecorder()
+
+	mockTransport := &MockRoundTripper{
+		StatusCode: http.StatusInternalServerError,
+		Response:   "failed to create request",
+	}
+	client := &http.Client{Transport: mockTransport}
+
+	handler := NewInputHandler(client)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Equal(t, "failed to create request\n", rr.Body.String())
+}
+
+func TestInputHandler_FailedToGetResponseFromServiceB(t *testing.T) {
+	os.Setenv("SERVICE_B_URL", "http://service-b:8081/weather")
+
+	input := Input{CEP: "12345678"}
+	jsonInput, _ := json.Marshal(input)
+
+	req := httptest.NewRequest("POST", "/input", bytes.NewBuffer(jsonInput))
+	rr := httptest.NewRecorder()
+
+	mockTransport := &MockRoundTripper{StatusCode: http.StatusInternalServerError, Response: "failed to get response from service B"}
+	client := &http.Client{Transport: mockTransport}
+
+	handler := NewInputHandler(client)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	assert.Equal(t, "failed to get response from service B\n", rr.Body.String())
+}
+
+func TestInputHandler_ServiceBErrorResponse(t *testing.T) {
+	os.Setenv("SERVICE_B_URL", "http://service-b:8081/weather")
+
+	input := Input{CEP: "12345678"}
+	jsonInput, _ := json.Marshal(input)
+
+	mockResponse := `{"error":"zipcode not found"}`
+	mockTransport := &MockRoundTripper{StatusCode: http.StatusNotFound, Response: mockResponse}
+	client := &http.Client{Transport: mockTransport}
+
+	req := httptest.NewRequest("POST", "/input", bytes.NewBuffer(jsonInput))
+	rr := httptest.NewRecorder()
+
+	handler := NewInputHandler(client)
+	handler.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	assert.JSONEq(t, mockResponse, rr.Body.String())
 }

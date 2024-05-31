@@ -2,22 +2,34 @@
 
 ## Descrição
 
-Este é um sistema em Go que receba um CEP, identifica a cidade e retorna o clima atual (temperatura em graus celsius, fahrenheit e kelvin). Está disponivel para consulta em:
+Este projeto consiste em dois serviços (A e B) que trabalham juntos para receber um CEP, identificar a cidade e retornar o clima atual (temperatura em graus Celsius, Fahrenheit e Kelvin) juntamente com o nome da cidade. O sistema implementa OpenTelemetry (OTEL) e Zipkin para tracing distribuído.
 
-https://go-weather-app-rhaqnpdasa-uc.a.run.app/
+## Visão Geral
+
+- **Serviço A**:
+  - Recebe um CEP via POST.
+  - Valida o CEP.
+  - Encaminha a solicitação para o Serviço B.
+
+- **Serviço B**:
+  - Recebe um CEP válido.
+  - Identifica a cidade correspondente.
+  - Retorna a temperatura atual em graus Celsius, Fahrenheit e Kelvin juntamente com o nome da cidade.
 
 ## Funcionalidades
 
-- Recebe um CEP válido de 8 dígitos.
-- Identifica a cidade correspondente ao CEP.
-- Retorna a temperatura atual em graus Celsius, Fahrenheit e Kelvin.
-- Configurado para fácil implantação usando Docker e Docker Compose.
+- **OpenTelemetry**: Implementação de tracing distribuído para monitoramento das transações entre serviços.
+- **Zipkin**: Utilizado para visualização dos traces coletados pelo OpenTelemetry.
+
+
 
 
 ## Estrutura do Projeto
 
 
 - go-weather-with-otel/
+  - .docker/
+   - otel-collector-config.yaml
   - service-a/
     - cmd/
       - main.go
@@ -77,39 +89,55 @@ docker-compose up --build -d
 isso irá construir a imagem do aplicativo e iniciar o serviço definido no docker-compose.yml
 
 
+
+## Execução 
+
+Faça uma requisição POST para o serviço A:
+
+```sh
+curl -X POST http://localhost:8080/input -H "Content-Type: application/json" -d '{"cep":"80010100"}'
 ```
+
+
+Visualize os spans no Zipkin:
+[http://localhost:9411](http://localhost:9411/)
+
+
 
 ## Exemplo de Resposta
 
-Em caso de sucesso
+### Em caso de sucesso:
 
-```
+```json
 {
   "temp_C": 19,
   "temp_F": 66.2,
   "temp_K": 292.15
 }
-
 ```
 
-Em caso de falha, quando o CEP não é válido (com formato correto):
+### Em caso de falha, quando o CEP não é válido (com formato correto):
 
-```
+```json
 {
   "error": "invalid zipcode"
 }
-
 ```
 
-Em caso de falha, quando o CEP não é encontrado:
+### Em caso de falha, quando o CEP não é encontrado:
 
-```
+```json
 {
   "error": "can not find zipcode"
 }
-
 ```
 
+## Referências
+
+- [Go](https://golang.org/doc/)
+- [Docker](https://docs.docker.com/)
+- [OpenTelemetry](https://opentelemetry.io/docs/)
+- [Zipkin](https://zipkin.io/)
 
 ## Créditos
 

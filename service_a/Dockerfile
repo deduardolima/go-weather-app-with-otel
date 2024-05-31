@@ -7,17 +7,17 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o main cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /input-service ./cmd/main.go
 
 FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
 
-WORKDIR /app
+WORKDIR /root/
 
-COPY --from=builder /app/main .
-COPY --from=builder /app/cmd/.env .
+COPY --from=builder /input-service .
+COPY ./cmd/.env .
 
 EXPOSE 8080
 
-CMD ["./main"]
+CMD ["./input-service"]

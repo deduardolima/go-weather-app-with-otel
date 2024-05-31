@@ -1,30 +1,21 @@
 package location
 
-import (
-	"context"
+import "context"
 
-	"go.opentelemetry.io/otel/trace"
-)
+type LocationService interface {
+	GetLocation(ctx context.Context, cep string) (string, error)
+}
 
-type LocationService struct {
+type locationService struct {
 	client *LocationClient
-	tracer trace.Tracer
 }
 
-func NewLocationService(tracer trace.Tracer) *LocationService {
-	return &LocationService{
-		client: NewLocationClient(tracer),
-		tracer: tracer,
+func NewLocationService() LocationService {
+	return &locationService{
+		client: NewLocationClient(),
 	}
 }
 
-func (ls *LocationService) GetLocation(ctx context.Context, cep string) (string, error) {
-	ctx, span := ls.tracer.Start(ctx, "LocationService_GetLocation")
-	defer span.End()
-
-	viaCEP, err := ls.client.GetLocation(ctx, cep)
-	if err != nil {
-		return "", err
-	}
-	return viaCEP.Localidade, nil
+func (ls *locationService) GetLocation(ctx context.Context, cep string) (string, error) {
+	return ls.client.GetLocation(ctx, cep)
 }

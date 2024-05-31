@@ -1,24 +1,31 @@
 package weather
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel"
 )
+
+type LocationService interface {
+	GetLocation(ctx context.Context, cep string) (string, error)
+}
+
+type WeatherService interface {
+	GetWeather(ctx context.Context, city string) (float64, error)
+}
 
 type WeatherHandler struct {
 	locationService LocationService
 	weatherService  WeatherService
-	tracer          trace.Tracer
 }
 
 func NewWeatherHandler(locationService LocationService, weatherService WeatherService) *WeatherHandler {
-	tracer := locationService.(interface{ Tracer() trace.Tracer }).Tracer()
 	return &WeatherHandler{
 		locationService: locationService,
 		weatherService:  weatherService,
-		tracer:          tracer,
 	}
 }
 
@@ -29,21 +36,29 @@ type WeatherResponse struct {
 	TempK float64 `json:"temp_K"`
 }
 
-type CEPRequest struct {
-	CEP string `json:"cep"`
-}
-
 func (h *WeatherHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, span := h.tracer.Start(r.Context(), "WeatherHandler_ServeHTTP")
+	tr := otel.Tracer("weather-handler")
+	ctx, span := tr.Start(r.Context(), "ServeHTTP")
 	defer span.End()
 
-	var req CEPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.CEP) != 8 {
-		http.Error(w, "invalid zipcode", http.StatusUnprocessableEntity)
+	fmt.Println("Mensagem recebida do servico A")
+
+	var input struct {
+		CEP string `json:"cep"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	city, err := h.locationService.GetLocation(ctx, req.CEP)
+	fmt.Printf("Received input: %+v\n", input)
+
+	if len(input.CEP) != 8 {
+		http.Error(w, "invalid zipcode", http.StatusUnprocessableEntity)
+		return
+	}
+	city, err := h.locationService.GetLocation(ctx, input.CEP)
 	if err != nil {
 		http.Error(w, "can not find zipcode", http.StatusNotFound)
 		return
