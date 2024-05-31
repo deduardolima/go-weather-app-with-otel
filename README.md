@@ -66,7 +66,7 @@ Este projeto consiste em dois serviços (A e B) que trabalham juntos para recebe
 
 ## Configuração
 ```
-git clone https://github.com/deduardolima/go-weather-app.git
+git clone https://github.com/deduardolima/go-weather-app-with-otel.git
 cd go-weather-app
 
 ```
