@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/spf13/viper"
 	"go.opentelemetry.io/otel"
@@ -42,7 +41,7 @@ func (wc *WeatherClient) GetWeather(ctx context.Context, location string) (float
 		return 0, fmt.Errorf("WEATHER_API_KEY not set")
 	}
 
-	encodedLocation := url.QueryEscape(strings.ReplaceAll(location, " ", ""))
+	encodedLocation := url.QueryEscape(location)
 	apiURL := fmt.Sprintf("http://api.weatherapi.com/v1/current.json?key=%s&q=%s", apiKey, encodedLocation)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)

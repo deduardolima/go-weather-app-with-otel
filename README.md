@@ -91,7 +91,6 @@ isso irá construir a imagem do aplicativo e iniciar o serviço definido no dock
 
 
 ## Execução 
-### Aguarde até que todos containeres estejam rodando para realizar a requisição abaixo
 Faça uma requisição POST para o serviço A:
 
 ```sh
