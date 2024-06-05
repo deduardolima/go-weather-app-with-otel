@@ -51,5 +51,9 @@ func (c *LocationClient) GetLocation(ctx context.Context, cep string) (string, e
 		return "", err
 	}
 
+	if locationResponse.Localidade == "" {
+		return "", fmt.Errorf("can not find zipcode")
+	}
+
 	return locationResponse.Localidade, nil
 }
